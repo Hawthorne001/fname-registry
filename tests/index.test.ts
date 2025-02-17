@@ -1,7 +1,7 @@
 import request from 'supertest';
 import { app, RESOLVE_ABI } from '../src/app.js';
 import { sql } from 'kysely';
-import { getDbClient, migrateToLatest } from '../src/db.js';
+import { getWriteClient, migrateToLatest } from '../src/db.js';
 import { log } from '../src/log.js';
 import {
   generateSignature,
@@ -15,8 +15,9 @@ import { bytesToHex, currentTimestamp } from '../src/util.js';
 import { createTestTransfer } from './utils.js';
 import { AbiCoder, ethers, Interface, ZeroAddress } from 'ethers';
 import { CCIP_ADDRESS } from '../src/env.js';
+import { jest } from '@jest/globals';
 
-const db = getDbClient();
+const db = getWriteClient();
 const anotherSigner = ethers.Wallet.createRandom();
 
 beforeAll(async () => {
@@ -146,12 +147,12 @@ describe('app', () => {
         timestamp: now,
         owner: anotherSigner.address.toLowerCase(),
       });
-      expect(verifySignature('test4', now, anotherSigner.address, transferRes.user_signature, signer.address)).toBe(
-        true
-      );
-      expect(verifySignature('test4', now, anotherSigner.address, transferRes.server_signature, signer.address)).toBe(
-        true
-      );
+      expect(
+        await verifySignature('test4', now, anotherSigner.address, transferRes.user_signature, signer.address)
+      ).toBe(true);
+      expect(
+        await verifySignature('test4', now, anotherSigner.address, transferRes.server_signature, signer.address)
+      ).toBe(true);
     });
 
     test('registering the same name to the same owner and fid twice should not fail', async () => {
@@ -225,6 +226,17 @@ describe('app', () => {
     });
   });
 
+  describe('current time', () => {
+    test('returns current time in seconds', async () => {
+      const mockTime = new Date('2020-01-01').getTime();
+      jest.spyOn(Date, 'now').mockImplementationOnce(() => mockTime);
+      const response = await request(app).get('/current-time');
+      expect(response.status).toBe(200);
+      expect(response.body.currentTime).toBe(Math.floor(mockTime / 1000));
+      jest.restoreAllMocks();
+    });
+  });
+
   describe('ccip resolution', () => {
     const resolveABI = new Interface(RESOLVE_ABI).getFunction('resolve')!;
 
@@ -241,7 +253,7 @@ describe('app', () => {
       expect(username).toBe('test1');
       expect(verifyCCIPSignature(username, timestamp, owner, signature, signer.address)).toBe(true);
       // CCIP domain is different from hub domain
-      expect(verifySignature(username, timestamp, owner, signature, signer.address)).toBe(false);
+      expect(await verifySignature(username, timestamp, owner, signature, signer.address)).toBe(false);
     });
 
     it('should return an empty signature for a ccip lookup of an unregistered name', async () => {

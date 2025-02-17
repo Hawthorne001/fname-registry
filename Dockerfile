@@ -1,6 +1,7 @@
 # syntax=docker/dockerfile:1.5
 
-FROM node:20.11.0-alpine3.19 as builder
+# When updating image version, make sure to update below layer as well
+FROM node:23.7.0-alpine3.20 as builder
 
 # Create app directory
 WORKDIR /app
@@ -9,7 +10,7 @@ WORKDIR /app
 RUN <<EOF
   apk update --no-cache
   apk add git             # Fetch some packages
-  apk add python3         # Some node gyp bindings requires Python
+  apk add python3         # Some node gyp bindings require Python
   apk add make g++        # Standard tools for building native extensions
   npm install -g node-gyp # Compile native extensions
 EOF
@@ -35,26 +36,28 @@ RUN <<EOF
   mv node_modules-development node_modules
 EOF
 
-# Copy application code after installing so we benefit from the layer cache
+# Copy the application code after installing so we benefit from the layer cache
 COPY . .
 
 # Build the application so we can distribute
 RUN yarn build
 
-# When updating image version, make sure to update above layer as well
-FROM node:20.11.0-alpine3.19 as app
+# When updating image version, make sure to update the above layer as well
+FROM node:23.7.0-alpine3.20 as app
 
 WORKDIR /app
 
 RUN <<EOF
   # Requirement for Datadog runtime metrics integration
   apk add libc6-compat
+  apk add curl
 EOF
 
 # Copy all packages including compiled extensions
 COPY --from=builder /node_modules-production node_modules
 # Copy essential source code
 COPY --from=builder /app/build .
+COPY ./pm2.config.js /app/pm2.config.cjs
 
 # Dummy value to get ESM detection to work
 RUN echo '{"type":"module"}' > package.json
@@ -66,4 +69,4 @@ COPY --from=app / /
 
 WORKDIR /app
 
-CMD ["node", "index.js"]
+CMD ["npx", "pm2-runtime", "pm2.config.cjs"]
